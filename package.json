@@ -1,28 +1,17 @@
 {
-  "name": "student-portfolio-backend",
+  "name": "student-portfolio-api",
   "version": "1.0.0",
-  "description": "Backend for PM SHRI Kendriya Vidyalya Student Portfolio System",
+  "description": "Simple API for Student Portfolio to access Google Sheets",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon app.js"
   },
-  "keywords": [
-    "education",
-    "portfolio",
-    "student",
-    "dashboard"
-  ],
-  "author": "KV Raebareli",
-  "license": "ISC",
   "dependencies": {
     "axios": "^1.6.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "express-session": "^1.17.3",
-    "session-file-store": "^1.5.0"
+    "express": "^4.18.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
