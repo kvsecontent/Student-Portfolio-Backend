@@ -1,89 +1,34 @@
 const express = require('express');
 const cors = require('cors');
-const session = require('express-session');
-const FileStore = require('session-file-store')(session);
 const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS configuration - allow requests from frontend
+// Only need these two environment variables
+const GOOGLE_SHEETS_ID = process.env.GOOGLE_SHEETS_ID;
+const GOOGLE_SHEETS_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+
+// Allow requests from GitHub Pages (or any origin for development)
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true
+  origin: '*',  // Allow all origins, or specify your GitHub Pages URL
+  methods: ['GET'], // Only allow GET requests
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Session configuration with FileStore instead of MemoryStore
-app.use(session({
-  store: new FileStore({
-    path: './sessions',
-    ttl: 86400, // 1 day in seconds
-    retries: 0
-  }),
-  secret: process.env.SESSION_SECRET || 'default_secret_change_in_production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { 
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
-
-// Authentication middleware
-const authenticate = (req, res, next) => {
-  if (req.session.isAuthenticated) {
-    return next();
-  }
-  
-  return res.status(401).json({ error: 'Not authenticated' });
-};
-
-// Login endpoint
-app.post('/api/login', (req, res) => {
-  const { admissionNumber } = req.body;
-  
-  // Validate admission number format (5 digits)
-  if (!/^\d{5}$/.test(admissionNumber)) {
-    return res.status(400).json({ error: 'Invalid admission number format' });
-  }
-  
-  // In a real implementation, you would validate against your database
-  // For now, we'll authenticate any valid 5-digit number
-  req.session.isAuthenticated = true;
-  req.session.admissionNumber = admissionNumber;
-  
-  res.json({ success: true });
-});
-
-// Logout endpoint
-app.post('/api/logout', (req, res) => {
-  req.session.destroy(err => {
-    if (err) {
-      return res.status(500).json({ error: 'Failed to logout' });
-    }
-    res.json({ success: true });
-  });
-});
-
-// Secure endpoint to get Google Sheets credentials
-app.get('/api/get-sheets-credentials', authenticate, (req, res) => {
-  res.json({
-    SHEET_ID: process.env.GOOGLE_SHEETS_ID,
-    API_KEY: process.env.GOOGLE_SHEETS_API_KEY
-  });
-});
-
-// Get student data from Google Sheets
-app.get('/api/student-data', authenticate, async (req, res) => {
+// Simple API endpoint to fetch student data by admission number
+app.get('/api/student-data', async (req, res) => {
   try {
-    const admissionNumber = req.query.admission || req.session.admissionNumber;
+    const admissionNumber = req.query.admission;
+    
+    // Validate admission number
+    if (!admissionNumber || !/^\d{5}$/.test(admissionNumber)) {
+      return res.status(400).json({ error: 'Invalid admission number. Must be 5 digits.' });
+    }
     
     // Google Sheets API endpoint with multiple ranges
-    const sheetsEndpoint = `https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values:batchGet`;
+    const sheetsEndpoint = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEETS_ID}/values:batchGet`;
     
     // Define the ranges we want to fetch
     const ranges = [
@@ -97,7 +42,7 @@ app.get('/api/student-data', authenticate, async (req, res) => {
     ];
     
     // Build the full URL with query parameters
-    const url = `${sheetsEndpoint}?key=${process.env.GOOGLE_SHEETS_API_KEY}&ranges=${ranges.map(range => encodeURIComponent(range)).join('&ranges=')}`;
+    const url = `${sheetsEndpoint}?key=${GOOGLE_SHEETS_API_KEY}&ranges=${ranges.map(range => encodeURIComponent(range)).join('&ranges=')}`;
     
     // Fetch data from Google Sheets
     const response = await axios.get(url);
@@ -108,8 +53,20 @@ app.get('/api/student-data', authenticate, async (req, res) => {
     res.json(processedData);
   } catch (error) {
     console.error('Error fetching data from Google Sheets:', error);
-    res.status(500).json({ error: 'Failed to fetch data' });
+    if (error.response && error.response.data) {
+      console.error('Google API Error:', error.response.data);
+    }
+    res.status(500).json({ error: 'Failed to fetch data from Google Sheets' });
   }
+});
+
+// API status endpoint
+app.get('/api/status', (req, res) => {
+  res.json({ 
+    status: 'online',
+    message: 'Student Portfolio API is running',
+    sheetsConfigured: Boolean(GOOGLE_SHEETS_ID && GOOGLE_SHEETS_API_KEY)
+  });
 });
 
 // Process the Google Sheets response
@@ -228,7 +185,9 @@ function processStudentData(sheetsData, admissionNumber) {
     // Calculate summary statistics
     const completedAssignments = assignments.filter(a => a.status === 'complete').length;
     const pendingAssignments = assignments.filter(a => a.status === 'pending').length;
-    const overallAttendance = attendance.reduce((sum, month) => sum + month.percentage, 0) / attendance.length;
+    const overallAttendance = attendance.length > 0 
+      ? attendance.reduce((sum, month) => sum + month.percentage, 0) / attendance.length
+      : 0;
     
     // Compile all data
     return {
@@ -283,17 +242,11 @@ function getValueByHeader(row, headers, headerName) {
   return index !== -1 ? (row[index] || '') : '';
 }
 
-// API status endpoint
-app.get('/api/status', (req, res) => {
-  res.json({ 
-    status: 'online',
-    message: 'Student Portfolio API is running'
-  });
-});
-
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Google Sheets ID configured: ${Boolean(GOOGLE_SHEETS_ID)}`);
+  console.log(`Google Sheets API Key configured: ${Boolean(GOOGLE_SHEETS_API_KEY)}`);
 });
 
 module.exports = app;
