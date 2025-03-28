@@ -1,14 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
+const FileStore = require('session-file-store')(session);
 const axios = require('axios');
-const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// CORS configuration - allow requests from frontend
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
   credentials: true
@@ -17,9 +17,14 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session configuration
+// Session configuration with FileStore instead of MemoryStore
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'keyboard cat',
+  store: new FileStore({
+    path: './sessions',
+    ttl: 86400, // 1 day in seconds
+    retries: 0
+  }),
+  secret: process.env.SESSION_SECRET || 'default_secret_change_in_production',
   resave: false,
   saveUninitialized: false,
   cookie: { 
@@ -28,15 +33,8 @@ app.use(session({
   }
 }));
 
-// Serve static frontend files in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'public')));
-}
-
 // Authentication middleware
 const authenticate = (req, res, next) => {
-  // Simple authentication check
-  // In a production environment, you'd want more robust authentication
   if (req.session.isAuthenticated) {
     return next();
   }
@@ -63,8 +61,12 @@ app.post('/api/login', (req, res) => {
 
 // Logout endpoint
 app.post('/api/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ success: true });
+  req.session.destroy(err => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to logout' });
+    }
+    res.json({ success: true });
+  });
 });
 
 // Secure endpoint to get Google Sheets credentials
@@ -281,12 +283,13 @@ function getValueByHeader(row, headers, headerName) {
   return index !== -1 ? (row[index] || '') : '';
 }
 
-// Fallback route for SPA in production
-if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// API status endpoint
+app.get('/api/status', (req, res) => {
+  res.json({ 
+    status: 'online',
+    message: 'Student Portfolio API is running'
   });
-}
+});
 
 // Start the server
 app.listen(PORT, () => {
