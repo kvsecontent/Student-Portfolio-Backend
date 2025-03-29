@@ -30,15 +30,15 @@ app.get('/api/student-data', async (req, res) => {
     // Google Sheets API endpoint with multiple ranges
     const sheetsEndpoint = `https://sheets.googleapis.com/v4/spreadsheets/${GOOGLE_SHEETS_ID}/values:batchGet`;
     
-    // Define the ranges we want to fetch
+    // Define the ranges we want to fetch - Using wider ranges for horizontal data
     const ranges = [
       'Students!A:G',
-      'Subjects!A:D',
-      'Activities!A:F',
-      'Assignments!A:G',
-      'Tests!A:H',
-      'Corrections!A:F',
-      'Attendance!A:F'
+      'Subjects!A:Z',      // Wider range for horizontal subject data
+      'Activities!A:Z',    // Wider range for horizontal activities
+      'Assignments!A:Z',   // Wider range for horizontal assignments
+      'Tests!A:Z',         // Wider range for horizontal tests
+      'Corrections!A:Z',   // Wider range for horizontal corrections
+      'Attendance!A:Z'     // Wider range for horizontal attendance
     ];
     
     // Build the full URL with query parameters
@@ -69,7 +69,7 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Process the Google Sheets response
+// Process the Google Sheets response with HORIZONTAL data structure
 function processStudentData(sheetsData, admissionNumber) {
   try {
     // Extract value ranges from the response
@@ -78,15 +78,15 @@ function processStudentData(sheetsData, admissionNumber) {
            attendanceSheet] = sheetsData.valueRanges;
     
     // Extract headers from each sheet
-    const studentsHeaders = studentsSheet.values[0];
-    const subjectsHeaders = subjectsSheet.values[0];
-    const activitiesHeaders = activitiesSheet.values[0];
-    const assignmentsHeaders = assignmentsSheet.values[0];
-    const testsHeaders = testsSheet.values[0];
-    const correctionsHeaders = correctionsSheet.values[0];
-    const attendanceHeaders = attendanceSheet.values[0];
+    const studentsHeaders = studentsSheet.values[0] || [];
+    const subjectsHeaders = subjectsSheet.values[0] || [];
+    const activitiesHeaders = activitiesSheet.values[0] || [];
+    const assignmentsHeaders = assignmentsSheet.values[0] || [];
+    const testsHeaders = testsSheet.values[0] || [];
+    const correctionsHeaders = correctionsSheet.values[0] || [];
+    const attendanceHeaders = attendanceSheet.values[0] || [];
     
-    // Find student info
+    // Find student info row - this remains the same (vertical format)
     const studentData = findStudentByAdmissionNo(studentsSheet.values, studentsHeaders, admissionNumber);
     
     if (!studentData) {
@@ -104,83 +104,39 @@ function processStudentData(sheetsData, admissionNumber) {
       photoUrl: getValueByHeader(studentData, studentsHeaders, 'photo_url') || '/api/placeholder/120/120'
     };
     
-    // Extract subject progress
-    const subjectProgress = filterSheetByAdmissionNo(subjectsSheet.values, subjectsHeaders, admissionNumber)
-      .map(row => ({
-        subject: getValueByHeader(row, subjectsHeaders, 'subject'),
-        progress: parseFloat(getValueByHeader(row, subjectsHeaders, 'progress')),
-        grade: getValueByHeader(row, subjectsHeaders, 'grade')
-      }));
+    // Find student rows for each horizontal sheet
+    const subjectRow = findStudentByAdmissionNo(subjectsSheet.values, subjectsHeaders, admissionNumber);
+    const activitiesRow = findStudentByAdmissionNo(activitiesSheet.values, activitiesHeaders, admissionNumber);
+    const assignmentsRow = findStudentByAdmissionNo(assignmentsSheet.values, assignmentsHeaders, admissionNumber);
+    const testsRow = findStudentByAdmissionNo(testsSheet.values, testsHeaders, admissionNumber);
+    const correctionsRow = findStudentByAdmissionNo(correctionsSheet.values, correctionsHeaders, admissionNumber);
+    const attendanceRow = findStudentByAdmissionNo(attendanceSheet.values, attendanceHeaders, admissionNumber);
     
-    // Extract recent tests (last 5)
-    const recentTests = filterSheetByAdmissionNo(testsSheet.values, testsHeaders, admissionNumber)
-      .sort((a, b) => {
-        const dateA = new Date(getValueByHeader(a, testsHeaders, 'date').split('-').reverse().join('-'));
-        const dateB = new Date(getValueByHeader(b, testsHeaders, 'date').split('-').reverse().join('-'));
-        return dateB - dateA;
-      })
-      .slice(0, 5)
-      .map(row => ({
-        subject: getValueByHeader(row, testsHeaders, 'subject'),
-        name: getValueByHeader(row, testsHeaders, 'name'),
-        date: getValueByHeader(row, testsHeaders, 'date'),
-        marks: `${getValueByHeader(row, testsHeaders, 'marks_obtained')}/${getValueByHeader(row, testsHeaders, 'max_marks')}`,
-        percentage: parseFloat(getValueByHeader(row, testsHeaders, 'percentage')),
-        grade: getValueByHeader(row, testsHeaders, 'grade')
-      }));
+    // Process horizontal data for each section
+    const subjectProgress = processHorizontalSubjects(subjectsHeaders, subjectRow);
+    const subjectActivities = processHorizontalActivities(activitiesHeaders, activitiesRow);
+    const assignments = processHorizontalAssignments(assignmentsHeaders, assignmentsRow);
+    const tests = processHorizontalTests(testsHeaders, testsRow);
     
-    // Extract subject activities
-    const subjectActivities = filterSheetByAdmissionNo(activitiesSheet.values, activitiesHeaders, admissionNumber)
-      .map(row => ({
-        subject: getValueByHeader(row, activitiesHeaders, 'subject'),
-        activity: getValueByHeader(row, activitiesHeaders, 'activity'),
-        date: getValueByHeader(row, activitiesHeaders, 'date'),
-        description: getValueByHeader(row, activitiesHeaders, 'description'),
-        status: getValueByHeader(row, activitiesHeaders, 'status')
-      }));
+    // Sort tests by date (newest first) and take the 5 most recent for dashboard
+    const recentTests = [...tests].sort((a, b) => {
+      // Handle date format: dd-mm-yyyy
+      const partsA = a.date.split('-');
+      const partsB = b.date.split('-');
+      const dateA = new Date(partsA[2], partsA[1] - 1, partsA[0]);
+      const dateB = new Date(partsB[2], partsB[1] - 1, partsB[0]);
+      return dateB - dateA;
+    }).slice(0, 5).map(test => ({
+      subject: test.subject,
+      name: test.name,
+      date: test.date,
+      marks: `${test.marksObtained}/${test.maxMarks}`,
+      percentage: test.percentage,
+      grade: test.grade
+    }));
     
-    // Extract assignments
-    const assignments = filterSheetByAdmissionNo(assignmentsSheet.values, assignmentsHeaders, admissionNumber)
-      .map(row => ({
-        subject: getValueByHeader(row, assignmentsHeaders, 'subject'),
-        name: getValueByHeader(row, assignmentsHeaders, 'name'),
-        assignedDate: getValueByHeader(row, assignmentsHeaders, 'assigned_date'),
-        dueDate: getValueByHeader(row, assignmentsHeaders, 'due_date'),
-        status: getValueByHeader(row, assignmentsHeaders, 'status'),
-        remarks: getValueByHeader(row, assignmentsHeaders, 'remarks') || ''
-      }));
-    
-    // Extract tests
-    const tests = filterSheetByAdmissionNo(testsSheet.values, testsHeaders, admissionNumber)
-      .map(row => ({
-        subject: getValueByHeader(row, testsHeaders, 'subject'),
-        name: getValueByHeader(row, testsHeaders, 'name'),
-        date: getValueByHeader(row, testsHeaders, 'date'),
-        maxMarks: parseInt(getValueByHeader(row, testsHeaders, 'max_marks')),
-        marksObtained: parseInt(getValueByHeader(row, testsHeaders, 'marks_obtained')),
-        percentage: parseFloat(getValueByHeader(row, testsHeaders, 'percentage')),
-        grade: getValueByHeader(row, testsHeaders, 'grade')
-      }));
-    
-    // Extract copy corrections
-    const corrections = filterSheetByAdmissionNo(correctionsSheet.values, correctionsHeaders, admissionNumber)
-      .map(row => ({
-        subject: getValueByHeader(row, correctionsHeaders, 'subject'),
-        copyType: getValueByHeader(row, correctionsHeaders, 'copy_type'),
-        date: getValueByHeader(row, correctionsHeaders, 'date'),
-        improvements: getValueByHeader(row, correctionsHeaders, 'improvements'),
-        remarks: getValueByHeader(row, correctionsHeaders, 'remarks')
-      }));
-    
-    // Extract attendance
-    const attendance = filterSheetByAdmissionNo(attendanceSheet.values, attendanceHeaders, admissionNumber)
-      .map(row => ({
-        month: getValueByHeader(row, attendanceHeaders, 'month'),
-        workingDays: parseInt(getValueByHeader(row, attendanceHeaders, 'working_days')),
-        present: parseInt(getValueByHeader(row, attendanceHeaders, 'present')),
-        absent: parseInt(getValueByHeader(row, attendanceHeaders, 'absent')),
-        percentage: parseFloat(getValueByHeader(row, attendanceHeaders, 'percentage'))
-      }));
+    const corrections = processHorizontalCorrections(correctionsHeaders, correctionsRow);
+    const attendance = processHorizontalAttendance(attendanceHeaders, attendanceRow);
     
     // Calculate summary statistics
     const completedAssignments = assignments.filter(a => a.status === 'complete').length;
@@ -212,14 +168,355 @@ function processStudentData(sheetsData, admissionNumber) {
   }
 }
 
+// Process horizontally structured subjects data
+function processHorizontalSubjects(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const subjects = [];
+  const progressSuffix = '_progress';
+  const gradeSuffix = '_grade';
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    
+    if (header.endsWith(progressSuffix)) {
+      const subject = header.substring(0, header.length - progressSuffix.length);
+      
+      // Get the progress value
+      const progressValue = studentRow[i];
+      if (!progressValue) continue; // Skip if no progress value
+      
+      const progress = parseFloat(progressValue);
+      if (isNaN(progress)) continue; // Skip if progress is not a number
+      
+      // Find the matching grade column
+      const gradeHeader = `${subject}${gradeSuffix}`;
+      const gradeIndex = headers.findIndex(h => h.toLowerCase() === gradeHeader);
+      const grade = (gradeIndex !== -1 && studentRow[gradeIndex]) ? studentRow[gradeIndex] : '';
+      
+      // Only add subjects with valid progress values
+      subjects.push({
+        subject: capitalizeSubject(subject),
+        progress: progress,
+        grade: grade
+      });
+    }
+  }
+  
+  return subjects;
+}
+
+// Process horizontally structured activities data
+function processHorizontalActivities(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const activities = [];
+  
+  // Key format examples: math_activity1, math_activity1_date, math_activity1_description, etc.
+  const activityPattern = /^([a-z_]+)_activity(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(activityPattern);
+    
+    if (match && studentRow[i]) {
+      const subject = match[1]; // e.g., "math"
+      const activityNum = match[2]; // e.g., "1"
+      const activityName = studentRow[i];
+      
+      // Skip if no activity name
+      if (!activityName) continue;
+      
+      // Find related fields
+      const dateHeader = `${subject}_activity${activityNum}_date`;
+      const descHeader = `${subject}_activity${activityNum}_description`;
+      const statusHeader = `${subject}_activity${activityNum}_status`;
+      
+      const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
+      const descIndex = headers.findIndex(h => h.toLowerCase() === descHeader);
+      const statusIndex = headers.findIndex(h => h.toLowerCase() === statusHeader);
+      
+      const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
+      const description = descIndex !== -1 ? (studentRow[descIndex] || '') : '';
+      const status = statusIndex !== -1 ? (studentRow[statusIndex] || 'pending') : 'pending';
+      
+      activities.push({
+        subject: capitalizeSubject(subject),
+        activity: activityName,
+        date: date,
+        description: description,
+        status: status.toLowerCase()
+      });
+    }
+  }
+  
+  return activities;
+}
+
+// Process horizontally structured assignments data
+function processHorizontalAssignments(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const assignments = [];
+  
+  // Key format examples: math_assignment1, math_assignment1_assigned_date, etc.
+  const assignmentPattern = /^([a-z_]+)_assignment(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(assignmentPattern);
+    
+    if (match && studentRow[i]) {
+      const subject = match[1]; // e.g., "math"
+      const assignmentNum = match[2]; // e.g., "1"
+      const assignmentName = studentRow[i];
+      
+      // Skip if no assignment name
+      if (!assignmentName) continue;
+      
+      // Find related fields
+      const assignedDateHeader = `${subject}_assignment${assignmentNum}_assigned_date`;
+      const dueDateHeader = `${subject}_assignment${assignmentNum}_due_date`;
+      const statusHeader = `${subject}_assignment${assignmentNum}_status`;
+      const remarksHeader = `${subject}_assignment${assignmentNum}_remarks`;
+      
+      const assignedDateIndex = headers.findIndex(h => h.toLowerCase() === assignedDateHeader);
+      const dueDateIndex = headers.findIndex(h => h.toLowerCase() === dueDateHeader);
+      const statusIndex = headers.findIndex(h => h.toLowerCase() === statusHeader);
+      const remarksIndex = headers.findIndex(h => h.toLowerCase() === remarksHeader);
+      
+      const assignedDate = assignedDateIndex !== -1 ? (studentRow[assignedDateIndex] || '') : '';
+      const dueDate = dueDateIndex !== -1 ? (studentRow[dueDateIndex] || '') : '';
+      const status = statusIndex !== -1 ? (studentRow[statusIndex] || 'pending') : 'pending';
+      const remarks = remarksIndex !== -1 ? (studentRow[remarksIndex] || '') : '';
+      
+      assignments.push({
+        subject: capitalizeSubject(subject),
+        name: assignmentName,
+        assignedDate: assignedDate,
+        dueDate: dueDate,
+        status: status.toLowerCase(),
+        remarks: remarks
+      });
+    }
+  }
+  
+  return assignments;
+}
+
+// Process horizontally structured tests data
+function processHorizontalTests(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const tests = [];
+  
+  // Key format examples: math_test1, math_test1_date, math_test1_max_marks, etc.
+  const testPattern = /^([a-z_]+)_test(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(testPattern);
+    
+    if (match && studentRow[i]) {
+      const subject = match[1]; // e.g., "math"
+      const testNum = match[2]; // e.g., "1"
+      const testName = studentRow[i];
+      
+      // Skip if no test name
+      if (!testName) continue;
+      
+      // Find related fields
+      const dateHeader = `${subject}_test${testNum}_date`;
+      const maxMarksHeader = `${subject}_test${testNum}_max_marks`;
+      const marksObtainedHeader = `${subject}_test${testNum}_marks_obtained`;
+      const percentageHeader = `${subject}_test${testNum}_percentage`;
+      const gradeHeader = `${subject}_test${testNum}_grade`;
+      
+      const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
+      const maxMarksIndex = headers.findIndex(h => h.toLowerCase() === maxMarksHeader);
+      const marksObtainedIndex = headers.findIndex(h => h.toLowerCase() === marksObtainedHeader);
+      const percentageIndex = headers.findIndex(h => h.toLowerCase() === percentageHeader);
+      const gradeIndex = headers.findIndex(h => h.toLowerCase() === gradeHeader);
+      
+      const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
+      
+      // Parse numeric values safely
+      let maxMarks = 0;
+      if (maxMarksIndex !== -1 && studentRow[maxMarksIndex]) {
+        maxMarks = parseInt(studentRow[maxMarksIndex]);
+        if (isNaN(maxMarks)) maxMarks = 0;
+      }
+      
+      let marksObtained = 0;
+      if (marksObtainedIndex !== -1 && studentRow[marksObtainedIndex]) {
+        marksObtained = parseInt(studentRow[marksObtainedIndex]);
+        if (isNaN(marksObtained)) marksObtained = 0;
+      }
+      
+      let percentage = 0;
+      if (percentageIndex !== -1 && studentRow[percentageIndex]) {
+        percentage = parseFloat(studentRow[percentageIndex]);
+        if (isNaN(percentage)) {
+          // Calculate percentage if not provided but we have maxMarks and marksObtained
+          if (maxMarks > 0) {
+            percentage = (marksObtained / maxMarks) * 100;
+          }
+        }
+      } else if (maxMarks > 0) {
+        // Calculate percentage if not provided
+        percentage = (marksObtained / maxMarks) * 100;
+      }
+      
+      const grade = gradeIndex !== -1 ? (studentRow[gradeIndex] || '') : '';
+      
+      tests.push({
+        subject: capitalizeSubject(subject),
+        name: testName,
+        date: date,
+        maxMarks: maxMarks,
+        marksObtained: marksObtained,
+        percentage: percentage,
+        grade: grade
+      });
+    }
+  }
+  
+  return tests;
+}
+
+// Process horizontally structured corrections data
+function processHorizontalCorrections(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const corrections = [];
+  
+  // Key format examples: math_correction1, math_correction1_date, etc.
+  const correctionPattern = /^([a-z_]+)_correction(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(correctionPattern);
+    
+    if (match && studentRow[i]) {
+      const subject = match[1]; // e.g., "math"
+      const correctionNum = match[2]; // e.g., "1"
+      const copyType = studentRow[i];
+      
+      // Skip if no copy type
+      if (!copyType) continue;
+      
+      // Find related fields
+      const dateHeader = `${subject}_correction${correctionNum}_date`;
+      const improvementsHeader = `${subject}_correction${correctionNum}_improvements`;
+      const remarksHeader = `${subject}_correction${correctionNum}_remarks`;
+      
+      const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
+      const improvementsIndex = headers.findIndex(h => h.toLowerCase() === improvementsHeader);
+      const remarksIndex = headers.findIndex(h => h.toLowerCase() === remarksHeader);
+      
+      const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
+      const improvements = improvementsIndex !== -1 ? (studentRow[improvementsIndex] || '') : '';
+      const remarks = remarksIndex !== -1 ? (studentRow[remarksIndex] || '') : '';
+      
+      corrections.push({
+        subject: capitalizeSubject(subject),
+        copyType: copyType,
+        date: date,
+        improvements: improvements,
+        remarks: remarks
+      });
+    }
+  }
+  
+  return corrections;
+}
+
+// Process horizontally structured attendance data
+function processHorizontalAttendance(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const attendance = [];
+  
+  // Key format examples: april_working, april_present, april_absent, april_percent
+  const workingSuffix = '_working';
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    
+    if (header.endsWith(workingSuffix) && studentRow[i]) {
+      const month = header.substring(0, header.length - workingSuffix.length);
+      
+      // Parse working days safely
+      let workingDays = 0;
+      if (studentRow[i]) {
+        workingDays = parseInt(studentRow[i]);
+        if (isNaN(workingDays)) workingDays = 0;
+      }
+      
+      // Skip if no working days
+      if (workingDays <= 0) continue;
+      
+      // Find related fields
+      const presentHeader = `${month}_present`;
+      const absentHeader = `${month}_absent`;
+      const percentHeader = `${month}_percent`;
+      
+      const presentIndex = headers.findIndex(h => h.toLowerCase() === presentHeader);
+      const absentIndex = headers.findIndex(h => h.toLowerCase() === absentHeader);
+      const percentIndex = headers.findIndex(h => h.toLowerCase() === percentHeader);
+      
+      // Parse present days safely
+      let present = 0;
+      if (presentIndex !== -1 && studentRow[presentIndex]) {
+        present = parseInt(studentRow[presentIndex]);
+        if (isNaN(present)) present = 0;
+      }
+      
+      // Parse absent days safely
+      let absent = 0;
+      if (absentIndex !== -1 && studentRow[absentIndex]) {
+        absent = parseInt(studentRow[absentIndex]);
+        if (isNaN(absent)) absent = 0;
+      }
+      
+      // Parse or calculate percentage
+      let percentage = 0;
+      if (percentIndex !== -1 && studentRow[percentIndex]) {
+        percentage = parseFloat(studentRow[percentIndex]);
+        if (isNaN(percentage)) {
+          // Calculate if parsing failed
+          if (workingDays > 0) {
+            percentage = (present / workingDays) * 100;
+          }
+        }
+      } else if (workingDays > 0) {
+        // Calculate if not provided
+        percentage = (present / workingDays) * 100;
+      }
+      
+      attendance.push({
+        month: capitalizeFirstLetter(month),
+        workingDays: workingDays,
+        present: present,
+        absent: absent,
+        percentage: percentage
+      });
+    }
+  }
+  
+  return attendance;
+}
+
 // Helper function to find a student by admission number
 function findStudentByAdmissionNo(values, headers, admissionNo) {
+  if (!values || !headers || values.length < 2) return null;
+  
   const admissionIndex = headers.findIndex(h => h.toLowerCase() === 'admission_no');
   if (admissionIndex === -1) return null;
   
   // Skip header row (index 0) and find student
   for (let i = 1; i < values.length; i++) {
-    if (values[i][admissionIndex] === admissionNo) {
+    if (values[i] && values[i][admissionIndex] === admissionNo) {
       return values[i];
     }
   }
@@ -227,19 +524,26 @@ function findStudentByAdmissionNo(values, headers, admissionNo) {
   return null;
 }
 
-// Helper function to filter sheet data by admission number
-function filterSheetByAdmissionNo(values, headers, admissionNo) {
-  const admissionIndex = headers.findIndex(h => h.toLowerCase() === 'admission_no');
-  if (admissionIndex === -1) return [];
-  
-  // Skip header row (index 0) and filter rows
-  return values.slice(1).filter(row => row[admissionIndex] === admissionNo);
-}
-
 // Helper function to get a value by header name
 function getValueByHeader(row, headers, headerName) {
+  if (!row || !headers) return '';
+  
   const index = headers.findIndex(h => h.toLowerCase() === headerName.toLowerCase());
-  return index !== -1 ? (row[index] || '') : '';
+  return index !== -1 && index < row.length ? (row[index] || '') : '';
+}
+
+// Helper function to capitalize first letter
+function capitalizeFirstLetter(string) {
+  if (!string) return '';
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+// Helper function to capitalize subject names (handles multi-word subjects)
+function capitalizeSubject(subject) {
+  if (!subject) return '';
+  return subject.split('_')
+    .map(word => capitalizeFirstLetter(word))
+    .join(' ');
 }
 
 // Start the server
