@@ -33,12 +33,12 @@ app.get('/api/student-data', async (req, res) => {
     // Define the ranges we want to fetch - Using wider ranges for horizontal data
     const ranges = [
       'Students!A:G',
-      'Subjects!A:Z',      // Wider range for horizontal subject data
-      'Activities!A:Z',    // Wider range for horizontal activities
-      'Assignments!A:Z',   // Wider range for horizontal assignments
-      'Tests!A:Z',         // Wider range for horizontal tests
-      'Corrections!A:Z',   // Wider range for horizontal corrections
-      'Attendance!A:Z'     // Wider range for horizontal attendance
+      'Subjects!A:ZZ',      // Wider range for horizontal subject data
+      'Activities!A:ZZZ',    // Wider range for horizontal activities
+      'Assignments!A:ZZZ',   // Wider range for horizontal assignments
+      'Tests!A:ZZZ',         // Wider range for horizontal tests
+      'Corrections!A:ZZZ',   // Wider range for horizontal corrections
+      'Attendance!A:ZZZ'     // Wider range for horizontal attendance
     ];
     
     // Build the full URL with query parameters
