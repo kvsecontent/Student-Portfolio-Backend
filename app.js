@@ -38,7 +38,8 @@ app.get('/api/student-data', async (req, res) => {
       'Assignments!A:ZZZ',   // Wider range for horizontal assignments
       'Tests!A:ZZZ',         // Wider range for horizontal tests
       'Corrections!A:ZZZ',   // Wider range for horizontal corrections
-      'Attendance!A:ZZZ'     // Wider range for horizontal attendance
+      'Attendance!A:ZZZ',    // Wider range for horizontal attendance
+      'Discipline!A:ZZZ'     // New discipline data sheet
     ];
     
     // Build the full URL with query parameters
@@ -75,7 +76,7 @@ function processStudentData(sheetsData, admissionNumber) {
     // Extract value ranges from the response
     const [studentsSheet, subjectsSheet, activitiesSheet, 
            assignmentsSheet, testsSheet, correctionsSheet, 
-           attendanceSheet] = sheetsData.valueRanges;
+           attendanceSheet, disciplineSheet] = sheetsData.valueRanges;
     
     // Extract headers from each sheet
     const studentsHeaders = studentsSheet.values[0] || [];
@@ -85,6 +86,7 @@ function processStudentData(sheetsData, admissionNumber) {
     const testsHeaders = testsSheet.values[0] || [];
     const correctionsHeaders = correctionsSheet.values[0] || [];
     const attendanceHeaders = attendanceSheet.values[0] || [];
+    const disciplineHeaders = disciplineSheet.values[0] || [];
     
     // Find student info row - this remains the same (vertical format)
     const studentData = findStudentByAdmissionNo(studentsSheet.values, studentsHeaders, admissionNumber);
@@ -111,6 +113,7 @@ function processStudentData(sheetsData, admissionNumber) {
     const testsRow = findStudentByAdmissionNo(testsSheet.values, testsHeaders, admissionNumber);
     const correctionsRow = findStudentByAdmissionNo(correctionsSheet.values, correctionsHeaders, admissionNumber);
     const attendanceRow = findStudentByAdmissionNo(attendanceSheet.values, attendanceHeaders, admissionNumber);
+    const disciplineRow = findStudentByAdmissionNo(disciplineSheet.values, disciplineHeaders, admissionNumber);
     
     // Process horizontal data for each section
     const subjectProgress = processHorizontalSubjects(subjectsHeaders, subjectRow);
@@ -137,6 +140,7 @@ function processStudentData(sheetsData, admissionNumber) {
     
     const corrections = processHorizontalCorrections(correctionsHeaders, correctionsRow);
     const attendance = processHorizontalAttendance(attendanceHeaders, attendanceRow);
+    const discipline = processHorizontalDiscipline(disciplineHeaders, disciplineRow);
     
     // Calculate summary statistics
     const completedAssignments = assignments.filter(a => a.status === 'complete').length;
@@ -155,6 +159,7 @@ function processStudentData(sheetsData, admissionNumber) {
       tests,
       corrections,
       attendance,
+      discipline,
       summary: {
         totalSubjects: subjectProgress.length,
         completedAssignments,
@@ -505,6 +510,74 @@ function processHorizontalAttendance(headers, studentRow) {
   }
   
   return attendance;
+}
+
+// Process horizontally structured discipline data
+function processHorizontalDiscipline(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const disciplineRecords = [];
+  
+  // Key format examples: discipline1, discipline1_date, discipline1_type, etc.
+  const disciplinePattern = /^discipline(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(disciplinePattern);
+    
+    if (match && studentRow[i]) {
+      const disciplineNum = match[1]; // e.g., "1"
+      const description = studentRow[i];
+      
+      // Skip if no description
+      if (!description) continue;
+      
+      // Find related fields
+      const dateHeader = `discipline${disciplineNum}_date`;
+      const typeHeader = `discipline${disciplineNum}_type`;
+      const actionHeader = `discipline${disciplineNum}_action`;
+      const teacherHeader = `discipline${disciplineNum}_teacher`;
+      const statusHeader = `discipline${disciplineNum}_status`;
+      const pointsHeader = `discipline${disciplineNum}_points`;
+      const remarksHeader = `discipline${disciplineNum}_remarks`;
+      
+      const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
+      const typeIndex = headers.findIndex(h => h.toLowerCase() === typeHeader);
+      const actionIndex = headers.findIndex(h => h.toLowerCase() === actionHeader);
+      const teacherIndex = headers.findIndex(h => h.toLowerCase() === teacherHeader);
+      const statusIndex = headers.findIndex(h => h.toLowerCase() === statusHeader);
+      const pointsIndex = headers.findIndex(h => h.toLowerCase() === pointsHeader);
+      const remarksIndex = headers.findIndex(h => h.toLowerCase() === remarksHeader);
+      
+      const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
+      const type = typeIndex !== -1 ? (studentRow[typeIndex] || '') : '';
+      const action = actionIndex !== -1 ? (studentRow[actionIndex] || '') : '';
+      const teacher = teacherIndex !== -1 ? (studentRow[teacherIndex] || '') : '';
+      const status = statusIndex !== -1 ? (studentRow[statusIndex] || 'pending') : 'pending';
+      
+      // Parse points safely
+      let points = 0;
+      if (pointsIndex !== -1 && studentRow[pointsIndex]) {
+        points = parseInt(studentRow[pointsIndex]);
+        if (isNaN(points)) points = 0;
+      }
+      
+      const remarks = remarksIndex !== -1 ? (studentRow[remarksIndex] || '') : '';
+      
+      disciplineRecords.push({
+        date: date,
+        type: type,
+        description: description,
+        action: action,
+        teacher: teacher,
+        status: status.toLowerCase(),
+        points: points,
+        remarks: remarks
+      });
+    }
+  }
+  
+  return disciplineRecords;
 }
 
 // Helper function to find a student by admission number
