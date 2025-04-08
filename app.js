@@ -518,8 +518,8 @@ function processHorizontalDiscipline(headers, studentRow) {
   
   const disciplineRecords = [];
   
-  // Key format examples: discipline1, discipline1_date, discipline1_type, etc.
-  const disciplinePattern = /^discipline(\d+)$/;
+  // Modified pattern to match discipline1_description column
+  const disciplinePattern = /^discipline(\d+)_description$/;
   
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i].toLowerCase();
