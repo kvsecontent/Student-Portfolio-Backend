@@ -39,7 +39,8 @@ app.get('/api/student-data', async (req, res) => {
       'Tests!A:ZZZ',         // Wider range for horizontal tests
       'Corrections!A:ZZZ',   // Wider range for horizontal corrections
       'Attendance!A:ZZZ',    // Wider range for horizontal attendance
-      'Discipline!A:ZZZ'     // New discipline data sheet
+      'Discipline!A:ZZZ',    // Discipline data sheet
+      'Games!A:ZZZ'          // NEW: Games data sheet
     ];
     
     // Build the full URL with query parameters
@@ -76,7 +77,7 @@ function processStudentData(sheetsData, admissionNumber) {
     // Extract value ranges from the response
     const [studentsSheet, subjectsSheet, activitiesSheet, 
            assignmentsSheet, testsSheet, correctionsSheet, 
-           attendanceSheet, disciplineSheet] = sheetsData.valueRanges;
+           attendanceSheet, disciplineSheet, gamesSheet] = sheetsData.valueRanges;
     
     // Extract headers from each sheet
     const studentsHeaders = studentsSheet.values[0] || [];
@@ -87,6 +88,7 @@ function processStudentData(sheetsData, admissionNumber) {
     const correctionsHeaders = correctionsSheet.values[0] || [];
     const attendanceHeaders = attendanceSheet.values[0] || [];
     const disciplineHeaders = disciplineSheet.values[0] || [];
+    const gamesHeaders = gamesSheet.values ? gamesSheet.values[0] || [] : [];
     
     // Find student info row - this remains the same (vertical format)
     const studentData = findStudentByAdmissionNo(studentsSheet.values, studentsHeaders, admissionNumber);
@@ -114,6 +116,7 @@ function processStudentData(sheetsData, admissionNumber) {
     const correctionsRow = findStudentByAdmissionNo(correctionsSheet.values, correctionsHeaders, admissionNumber);
     const attendanceRow = findStudentByAdmissionNo(attendanceSheet.values, attendanceHeaders, admissionNumber);
     const disciplineRow = findStudentByAdmissionNo(disciplineSheet.values, disciplineHeaders, admissionNumber);
+    const gamesRow = gamesSheet.values ? findStudentByAdmissionNo(gamesSheet.values, gamesHeaders, admissionNumber) : null;
     
     // Process horizontal data for each section
     const subjectProgress = processHorizontalSubjects(subjectsHeaders, subjectRow);
@@ -141,6 +144,7 @@ function processStudentData(sheetsData, admissionNumber) {
     const corrections = processHorizontalCorrections(correctionsHeaders, correctionsRow);
     const attendance = processHorizontalAttendance(attendanceHeaders, attendanceRow);
     const discipline = processHorizontalDiscipline(disciplineHeaders, disciplineRow);
+    const games = processHorizontalGames(gamesHeaders, gamesRow);
     
     // Calculate summary statistics
     const completedAssignments = assignments.filter(a => a.status === 'complete').length;
@@ -160,6 +164,7 @@ function processStudentData(sheetsData, admissionNumber) {
       corrections,
       attendance,
       discipline,
+      games,
       summary: {
         totalSubjects: subjectProgress.length,
         completedAssignments,
@@ -236,21 +241,25 @@ function processHorizontalActivities(headers, studentRow) {
       const dateHeader = `${subject}_activity${activityNum}_date`;
       const descHeader = `${subject}_activity${activityNum}_description`;
       const statusHeader = `${subject}_activity${activityNum}_status`;
+      const remarkHeader = `${subject}_activity${activityNum}_remark`; // New remark field
       
       const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
       const descIndex = headers.findIndex(h => h.toLowerCase() === descHeader);
       const statusIndex = headers.findIndex(h => h.toLowerCase() === statusHeader);
+      const remarkIndex = headers.findIndex(h => h.toLowerCase() === remarkHeader); // New remark index
       
       const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
       const description = descIndex !== -1 ? (studentRow[descIndex] || '') : '';
       const status = statusIndex !== -1 ? (studentRow[statusIndex] || 'pending') : 'pending';
+      const remark = remarkIndex !== -1 ? (studentRow[remarkIndex] || '') : ''; // Get remark value
       
       activities.push({
         subject: capitalizeSubject(subject),
         activity: activityName,
         date: date,
         description: description,
-        status: status.toLowerCase()
+        status: status.toLowerCase(),
+        remark: remark // Include remark in the output
       });
     }
   }
@@ -578,6 +587,53 @@ function processHorizontalDiscipline(headers, studentRow) {
   }
   
   return disciplineRecords;
+}
+
+// Process horizontally structured games data
+function processHorizontalGames(headers, studentRow) {
+  if (!studentRow || !headers) return [];
+  
+  const games = [];
+  
+  // Key format examples: math_game1, math_game1_date, math_game1_description, etc.
+  const gamePattern = /^([a-z_]+)_game(\d+)$/;
+  
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    const match = header.match(gamePattern);
+    
+    if (match && studentRow[i]) {
+      const subject = match[1]; // e.g., "math"
+      const gameNum = match[2]; // e.g., "1"
+      const gameName = studentRow[i];
+      
+      // Skip if no game name
+      if (!gameName) continue;
+      
+      // Find related fields
+      const dateHeader = `${subject}_game${gameNum}_date`;
+      const descHeader = `${subject}_game${gameNum}_description`;
+      const statusHeader = `${subject}_game${gameNum}_status`;
+      
+      const dateIndex = headers.findIndex(h => h.toLowerCase() === dateHeader);
+      const descIndex = headers.findIndex(h => h.toLowerCase() === descHeader);
+      const statusIndex = headers.findIndex(h => h.toLowerCase() === statusHeader);
+      
+      const date = dateIndex !== -1 ? (studentRow[dateIndex] || '') : '';
+      const description = descIndex !== -1 ? (studentRow[descIndex] || '') : '';
+      const status = statusIndex !== -1 ? (studentRow[statusIndex] || 'pending') : 'pending';
+      
+      games.push({
+        subject: capitalizeSubject(subject),
+        name: gameName,
+        date: date,
+        description: description,
+        status: status.toLowerCase()
+      });
+    }
+  }
+  
+  return games;
 }
 
 // Helper function to find a student by admission number
